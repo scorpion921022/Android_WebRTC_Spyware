@@ -503,6 +503,6 @@ I welcome any contributions! Please feel free to submit pull requests, report bu
 
 ---
 
-*Built with ❤️ by Dhruv Athaide using WebRTC, Android, and Node.js*
+*Built with ❤️ by Dhruv Athaideusing Kotlin, WebRTC, Android, and Node.js*
 
 </div>
