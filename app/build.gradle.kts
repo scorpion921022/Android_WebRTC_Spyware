@@ -61,4 +61,5 @@ dependencies {
     implementation (libs.preference)
     implementation (libs.okhttp)
     implementation (libs.socket.io.client)
+    implementation (libs.work.runtime)
 }

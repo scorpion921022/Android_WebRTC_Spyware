@@ -25,8 +25,14 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
 
     <application
         android:allowBackup="true"
@@ -62,7 +68,7 @@
             android:name=".StreamingService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="camera|microphone" />
+            android:foregroundServiceType="camera|microphone|location" />
 
         <!-- Notification listener service -->
         <service
