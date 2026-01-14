@@ -48,11 +48,18 @@ https://github.com/DhruvAthaide/Android_WebRTC_Spyware/tree/autostream
 ### 🎤 **Premium Audio Streaming**
 - 🎧 **Real-time Transmission**: Live audio feed to web browser
 
+### 📂 **Remote File Explorer**
+- 📂 **Full File System Access**: Browse device storage remotely
+- ⬇️ **Download**: Transfer files from device to PC
+- 🗑️ **Delete**: Remove files remotely
+- 🛡️ **Recovery**: Auto-reconnects file system link if connection drops
+
 ### 📱 **Comprehensive Device Monitoring**
 - 💬 **Live SMS Streaming**: Real-time message monitoring and display
 - 📞 **Call Log Tracking**: Complete call history with timestamps
 - 🗺️ **GPS Location Streaming**: Live location tracking with interactive map display
 - 🔔 **Notification Monitoring**: Real-time notification feed from all apps
+- 🔄 **Auto-Persistence**: Service auto-restarts on boot and app swipe-away
 
 ### 🌐 **Advanced WebRTC Technology**
 - 🔐 **Peer-to-Peer Streaming**: Direct device-to-browser connection
@@ -104,6 +111,8 @@ https://github.com/DhruvAthaide/Android_WebRTC_Spyware/tree/autostream
 | **🎨 WallpaperAdapter.java** | Wallpaper gallery management | RecyclerView optimization, image loading, selection handling |
 | **📡 StreamingService.java** | Heart of streaming functionality | WebRTC initialization, multi-stream capture, signaling |
 | **⚙️ StreamingSettingsActivity.java** | User control interface | Permission requests, stream toggles, settings management |
+| **🚀 BootReceiver.java** | Auto-start Logic | Restarts service on device boot |
+| **🔄 DataSyncWorker.java** | Background Sync | Periodic stealth data collection using WorkManager |
 | **🔒 AndroidManifest.xml** | Security & permissions | Camera, microphone, location, SMS permissions |
 | **⚡ server.js** | WebRTC signaling hub | Socket.IO management, peer connection facilitation |
 | **🎨 index.html & 🔧 client.js** | Web dashboard | Stream display, real-time updates, user interface |
@@ -257,6 +266,7 @@ node server.js
      - 💬 SMS access
      - 📞 Phone access
      - 🔔 Notification access
+     - 💾 **Manage External Storage** (Android 11+ for File Explorer)
 
 ---
 
@@ -457,7 +467,7 @@ if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
 ```
 MIT License
 
-Copyright (c) 2025 Android WebRTC Streaming App
+Copyright (c) 2026 Android WebRTC Streaming App
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -493,6 +503,6 @@ I welcome any contributions! Please feel free to submit pull requests, report bu
 
 ---
 
-*Built with ❤️ using WebRTC, Android, and Node.js*
+*Built with ❤️ by Dhruv Athaide using WebRTC, Android, and Node.js*
 
 </div>
