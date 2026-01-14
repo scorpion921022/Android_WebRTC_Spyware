@@ -137,6 +137,56 @@ io.on('connection', socket => {
     }
   });
 
+  // File Explorer Events
+  const fsEvents = ['fs:list', 'fs:files', 'fs:download', 'fs:download_ready', 'fs:delete'];
+  console.log('Registering FS Event Handlers'); // Debug log to confirm code load
+  fsEvents.forEach(event => {
+    socket.on(event, data => {
+      console.log(`Relaying ${event} from ${socket.id}`);
+      console.log(`Current clients - Web: ${webClients.size}, Android: ${androidClients.size}`);
+      // Incoming data might be just a path string (from Web) or an object (from Android)
+      // We expect the client (Web) to send { to: targetId, path: "..." } for commands
+      // And Android to send { to: targetId, ... } for responses
+      
+      let targetId = null;
+      let payload = data;
+
+      // Unpack "to" content if it exists, otherwise we might need to look it up 
+      // (Simple relay logic: blindly trust 'to' field if present)
+      if (typeof data === 'object' && data.to) {
+        targetId = data.to;
+      } else if (Array.isArray(data) && data.length > 0) {
+          // Some old socket libraries send args as array. 
+          // But our Android impl sends arguments individually or as objects.
+          // Let's assume standard object emission with 'to' property for robust routing.
+      }
+      
+      // Special handling if the client didn't wrap it (e.g. naive emit). 
+      // But our updated implementation plan and Android code use wrapped objects {to, ...}
+      
+      if (targetId && io.sockets.sockets.get(targetId)) {
+        io.to(targetId).emit(event, payload);
+        console.log(`${event} relayed to ${targetId}`);
+      } else {
+        // Fallback: If Sender is Web, send to all Androids? 
+        // If Sender is Android, send to all Webs?
+        // For security/stability, we prefer explicit 'to'. 
+        // However, for lazy dev, if 'to' is missing:
+        if (webClients.has(socket.id)) {
+             // Web sent it, broadcast to all Androids (usually just one)
+             androidClients.forEach(id => io.to(id).emit(event, payload));
+             console.log(`${event} broadcast to all Androids`);
+        } else if (androidClients.has(socket.id)) {
+             // Android sent it, broadcast to all Webs
+             webClients.forEach(id => io.to(id).emit(event, payload));
+             console.log(`${event} broadcast to all Webs`);
+        } else {
+             console.warn(`Could not route ${event} from ${socket.id}`);
+        }
+      }
+    });
+  });
+
   socket.on('disconnect', () => {
     console.log(`Client disconnected: ${socket.id}`);
     const wasWeb = webClients.delete(socket.id);

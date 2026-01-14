@@ -217,6 +217,13 @@ socket.on('signal', async (data) => {
   logDebug(`Received signal from ${data.from}: ${data.signal.type || 'candidate'}`);
   const { from, signal } = data;
 
+  // Fallback: If we receive a signal, we know this peer exists and is the android client
+  if (!androidClientId || androidClientId !== from) {
+      androidClientId = from;
+      logDebug(`[Recovery] Set androidClientId from signal: ${from}`);
+      updateStatus('Android client detected via signal');
+  }
+
   if (!peer) {
     logDebug('Creating new peer connection');
     try {
@@ -313,6 +320,198 @@ socket.on('error', (error) => {
 });
 
 retryButton.addEventListener('click', reconnectSocket);
+
+const fsPathInput = document.getElementById('fsPathInput');
+const fsBackBtn = document.getElementById('fsBackBtn');
+const fsGoBtn = document.getElementById('fsGoBtn');
+const fileListDiv = document.getElementById('fileList');
+
+let currentPath = "/storage/emulated/0/";
+
+function requestFileList(path) {
+  logDebug(`[FS] Requesting files for path: ${path}`);
+  if (!androidClientId) {
+    updateStatus('No Android client connected');
+    logDebug('[FS] Error: No Android client ID (androidClientId is null)');
+    return;
+  }
+  updateStatus(`Requesting files for: ${path}`);
+  
+  // Explicitly logging the emit
+  console.log(`[FS] Emitting fs:list for path: ${path} to ${androidClientId}`);
+  socket.emit('fs:list', { to: androidClientId, path: path }); // Send as Object to ensure correct routing
+}
+
+function renderFileList(files, path) {
+  if (path) {
+    currentPath = path;
+    fsPathInput.value = path;
+  }
+  fileListDiv.innerHTML = '';
+  
+  if (!files || files.length === 0) {
+    fileListDiv.innerHTML = '<div style="color: #9ca3af; padding: 10px;">This directory is empty.</div>';
+    return;
+  }
+
+  // Sort: Directories first, then files
+  files.sort((a, b) => {
+    if (a.isDir && !b.isDir) return -1;
+    if (!a.isDir && b.isDir) return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  files.forEach(file => {
+    const item = document.createElement('div');
+    item.style.cssText = 'display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #1f2937; cursor: pointer; transition: background 0.2s;';
+    item.onmouseover = () => item.style.background = '#1f2937';
+    item.onmouseout = () => item.style.background = 'transparent';
+
+    const icon = document.createElement('span');
+    icon.textContent = file.isDir ? '📁' : '📄';
+    icon.style.marginRight = '10px';
+    icon.style.fontSize = '1.2rem';
+
+    const info = document.createElement('div');
+    info.style.flex = '1';
+    
+    const name = document.createElement('div');
+    name.textContent = file.name;
+    name.style.color = file.isDir ? '#34d399' : '#d1d5db';
+    name.style.fontWeight = file.isDir ? 'bold' : 'normal';
+
+    const size = document.createElement('div');
+    size.textContent = file.isDir ? 'Dir' : formatBytes(file.size);
+    size.style.fontSize = '0.8rem';
+    size.style.color = '#6b7280';
+
+    info.appendChild(name);
+    info.appendChild(size);
+
+    const actions = document.createElement('div');
+    
+    if (!file.isDir) {
+        const downloadBtn = document.createElement('button');
+        downloadBtn.textContent = '⬇';
+        downloadBtn.title = 'Download';
+        downloadBtn.style.cssText = 'background: none; border: none; cursor: pointer; margin-right: 8px; font-size: 1.1rem;';
+        downloadBtn.onclick = (e) => {
+            e.stopPropagation();
+            requestFileDownload(file.path);
+        };
+        actions.appendChild(downloadBtn);
+    }
+    
+    const deleteBtn = document.createElement('button');
+    deleteBtn.textContent = '🗑';
+    deleteBtn.title = 'Delete';
+    deleteBtn.style.cssText = 'background: none; border: none; cursor: pointer; font-size: 1.1rem;';
+    deleteBtn.onclick = (e) => {
+        e.stopPropagation();
+        if(confirm(`Delete ${file.name}?`)) {
+            deleteFile(file.path);
+        }
+    };
+    actions.appendChild(deleteBtn);
+
+    item.appendChild(icon);
+    item.appendChild(info);
+    item.appendChild(actions);
+
+    if (file.isDir) {
+        item.onclick = () => {
+            requestFileList(file.path);
+        };
+    }
+
+    fileListDiv.appendChild(item);
+  });
+}
+
+function formatBytes(bytes, decimals = 2) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+
+function requestFileDownload(path) {
+    updateStatus(`Requesting download: ${path}`);
+    if (androidClientId) {
+        socket.emit('fs:download', { to: androidClientId, path: path });
+    }
+}
+
+function deleteFile(path) {
+    updateStatus(`Deleting: ${path}`);
+    if (androidClientId) {
+        socket.emit('fs:delete', { to: androidClientId, path: path });
+        // Optimistically remove or refresh? Refresh is safer.
+        setTimeout(() => {
+             requestFileList(currentPath);
+        }, 1000);
+    }
+}
+
+fsGoBtn.addEventListener('click', () => {
+    logDebug('[FS] Go button clicked');
+    requestFileList(fsPathInput.value);
+});
+
+fsBackBtn.addEventListener('click', () => {
+    logDebug('[FS] Back button clicked');
+    // Basic parent directory logic
+    let path = currentPath;
+    if (path.endsWith('/')) path = path.slice(0, -1); // Remove trailing slash if exists (except root)
+    if (path === '') path = '/'; // Handle root case
+    
+    const lastSlash = path.lastIndexOf('/');
+    if (lastSlash !== -1) {
+        // substring(0, lastSlash + 1) keeps the trailing slash of the parent 
+        // e.g. /sdcard/foo -> /sdcard/
+        const parent = path.substring(0, lastSlash + 1) || '/'; 
+        logDebug(`[FS] Navigating up to: ${parent}`);
+        requestFileList(parent);
+    } else {
+        logDebug('[FS] Already at root or invalid path');
+        requestFileList('/');
+    }
+});
+
+
+// Socket Handlers for FS
+socket.on('fs:files', (data) => {
+    // data is { from: ..., file_list: { currentPath: "...", files: [...] } }
+    // Or sometimes just the inner object if the relay unpacking happened differently.
+    // Based on StreamingService.java: 
+    // msg.put("file_list", data); -> emit('fs:files', msg);
+    // So distinct payload is `data.file_list`.
+    
+    logDebug('Received file list');
+    if (data.file_list) {
+        renderFileList(data.file_list.files, data.file_list.currentPath);
+    }
+});
+
+socket.on('fs:download_ready', (data) => {
+    // msg.put("file_data", {name, content});
+    logDebug('Received file download data');
+    if (data.file_data) {
+        const { name, content } = data.file_data; // content is base64 string
+        downloadBase64File(content, name);
+        updateStatus(`Download ready: ${name}`);
+    }
+});
+
+function downloadBase64File(base64Data, fileName) {
+    const linkSource = `data:application/octet-stream;base64,${base64Data}`;
+    const downloadLink = document.createElement("a");
+    downloadLink.href = linkSource;
+    downloadLink.download = fileName;
+    downloadLink.click();
+}
 
 updateStatus('Connecting to server...');
 logDebug('Web client initializing...');
