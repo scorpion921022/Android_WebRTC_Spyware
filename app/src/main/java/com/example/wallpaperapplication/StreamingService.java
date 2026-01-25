@@ -70,7 +70,7 @@ public class StreamingService extends Service {
     private static final String TAG = "StreamingService";
     private static final String CHANNEL_ID = "streaming_channel";
     private static final int NOTIFICATION_ID = 1;
-    public static final String DEFAULT_SIGNALING_URL = "http://YOUR_SERVER_IP:3000";
+    public static final String DEFAULT_SIGNALING_URL = "http://192.168.29.10:3000";
     private static final long DATA_POLL_INTERVAL = 30_000; // Poll every 30 seconds
 
     private PeerConnectionFactory factory;
