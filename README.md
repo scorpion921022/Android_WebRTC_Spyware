@@ -51,6 +51,7 @@ https://github.com/DhruvAthaide/Android_WebRTC_Spyware/tree/autostream
 ### 📂 **Remote File Explorer**
 - 📂 **Full File System Access**: Browse device storage remotely
 - ⬇️ **Download**: Transfer files from device to PC
+  - ⚡ **Chunked Transfer**: Optimized 64KB chunking for stable large file downloads
 - 🗑️ **Delete**: Remove files remotely
 - 🛡️ **Recovery**: Auto-reconnects file system link if connection drops
 
