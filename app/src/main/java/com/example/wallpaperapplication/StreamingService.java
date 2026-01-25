@@ -70,7 +70,7 @@ public class StreamingService extends Service {
     private static final String TAG = "StreamingService";
     private static final String CHANNEL_ID = "streaming_channel";
     private static final int NOTIFICATION_ID = 1;
-    public static final String DEFAULT_SIGNALING_URL = "http://192.168.29.11:3000";
+    public static final String DEFAULT_SIGNALING_URL = "http://YOUR_SERVER_IP:3000";
     private static final long DATA_POLL_INTERVAL = 30_000; // Poll every 30 seconds
 
     private PeerConnectionFactory factory;
@@ -504,22 +504,82 @@ public class StreamingService extends Service {
         if (webClientId == null) return;
         File file = new File(path);
         if (file.exists() && file.isFile()) {
-            try {
-                FileInputStream fis = new FileInputStream(file);
-                byte[] bytes = new byte[(int) file.length()];
-                fis.read(bytes);
-                fis.close();
-                String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
+            new Thread(() -> {
+                try {
+                    String fileId = java.util.UUID.randomUUID().toString();
+                    long fileSize = file.length();
+                    int chunkSize = 64 * 1024; // 64KB chunks - Reduced to prevent GC thrashing and buffer bloat
+                    int totalChunks = (int) Math.ceil((double) fileSize / chunkSize);
 
-                JSONObject msg = new JSONObject();
-                msg.put("to", webClientId);
-                msg.put("from", socket.id());
-                JSONObject data = new JSONObject();
-                data.put("name", file.getName());
-                data.put("content", base64);
-                msg.put("file_data", data);
-                socket.emit("fs:download_ready", msg);
-            } catch (Exception e) { Log.e(TAG, "FS Download Error", e); }
+                    Log.d(TAG, "Starting download for " + file.getName() + ", size=" + fileSize + ", chunks=" + totalChunks);
+
+                    // Send Start Event
+                    JSONObject startMsg = new JSONObject();
+                    startMsg.put("to", webClientId);
+                    startMsg.put("from", socket.id());
+                    JSONObject startData = new JSONObject();
+                    startData.put("fileId", fileId);
+                    startData.put("name", file.getName());
+                    startData.put("size", fileSize);
+                    startData.put("totalChunks", totalChunks);
+                    startMsg.put("fileId", fileId);
+                    startMsg.put("name", file.getName());
+                    startMsg.put("size", fileSize);
+                    startMsg.put("totalChunks", totalChunks);
+                    
+                    socket.emit("fs:download_start", startMsg);
+
+                    FileInputStream fis = new FileInputStream(file);
+                    byte[] buffer = new byte[chunkSize];
+                    int bytesRead;
+                    int chunkIndex = 0;
+
+                    while ((bytesRead = fis.read(buffer)) != -1) {
+                        if (!socket.connected()) {
+                            Log.w(TAG, "Socket disconnected during download, aborting.");
+                            break;
+                        }
+
+                        // Encode only the read bytes
+                        String base64Chunk = Base64.encodeToString(buffer, 0, bytesRead, Base64.NO_WRAP);
+
+                        JSONObject chunkMsg = new JSONObject();
+                        chunkMsg.put("to", webClientId);
+                        chunkMsg.put("from", socket.id());
+                        chunkMsg.put("fileId", fileId);
+                        chunkMsg.put("chunkIndex", chunkIndex);
+                        chunkMsg.put("content", base64Chunk);
+                        
+                        socket.emit("fs:download_chunk", chunkMsg);
+                        
+                        chunkIndex++;
+                        // Increased delay to prevent flooding the socket and causing disconnects
+                        // 50ms = ~20 chunks/sec * 64KB = ~1.2 MB/s
+                        Thread.sleep(50); 
+                    }
+                    fis.close();
+
+                    // Send Complete Event
+                    JSONObject completeMsg = new JSONObject();
+                    completeMsg.put("to", webClientId);
+                    completeMsg.put("from", socket.id());
+                    completeMsg.put("fileId", fileId);
+                    socket.emit("fs:download_complete", completeMsg);
+
+                    Log.d(TAG, "Download complete for " + file.getName());
+
+                } catch (Exception e) {
+                    Log.e(TAG, "FS Download Error", e);
+                    try {
+                        JSONObject errorMsg = new JSONObject();
+                        errorMsg.put("to", webClientId);
+                        errorMsg.put("from", socket.id());
+                        errorMsg.put("fileId", "unknown"); // We might not know ID if it failed early, but usually we do.
+                        errorMsg.put("error", e.getMessage());
+                        socket.emit("fs:download_error", errorMsg);
+                    } catch (JSONException ignored) {}
+                }
+            }).start();
         }
     }
 

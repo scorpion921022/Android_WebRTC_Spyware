@@ -138,7 +138,7 @@ io.on('connection', socket => {
   });
 
   // File Explorer Events
-  const fsEvents = ['fs:list', 'fs:files', 'fs:download', 'fs:download_ready', 'fs:delete'];
+  const fsEvents = ['fs:list', 'fs:files', 'fs:download', 'fs:download_ready', 'fs:delete', 'fs:download_start', 'fs:download_chunk', 'fs:download_complete', 'fs:download_error'];
   console.log('Registering FS Event Handlers'); // Debug log to confirm code load
   fsEvents.forEach(event => {
     socket.on(event, data => {

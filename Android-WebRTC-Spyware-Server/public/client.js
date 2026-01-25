@@ -36,6 +36,9 @@ let audioTrack = null;
 let frontVideoTrack = null;
 let backVideoTrack = null;
 
+// Chunked Download State
+let activeDownloads = {}; // Map of fileId -> { name, buffer, totalChunks, receivedChunks }
+
 const config = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -495,11 +498,83 @@ socket.on('fs:files', (data) => {
     }
 });
 
+socket.on('fs:download_start', (data) => {
+    // data: { fileId, name, size, totalChunks }
+    const { fileId, name, size, totalChunks } = data;
+    logDebug(`[FS] Download start: ${name} (${totalChunks} chunks)`);
+    activeDownloads[fileId] = {
+        name: name,
+        buffer: new Array(totalChunks),
+        totalChunks: totalChunks,
+        receivedChunks: 0,
+        startTime: Date.now()
+    };
+    updateStatus(`Downloading ${name} (0%)`);
+});
+
+socket.on('fs:download_chunk', (data) => {
+    // data: { fileId, chunkIndex, content }
+    const { fileId, chunkIndex, content } = data;
+    const download = activeDownloads[fileId];
+    
+    if (download) {
+        if (!download.buffer[chunkIndex]) {
+             download.buffer[chunkIndex] = content;
+             download.receivedChunks++;
+        }
+        
+        // Update progress every 5% or so to avoid UI spam
+        const progress = Math.floor((download.receivedChunks / download.totalChunks) * 100);
+        if (progress % 5 === 0) {
+            updateStatus(`Downloading ${download.name} (${progress}%)`);
+        }
+    }
+});
+
+socket.on('fs:download_complete', (data) => {
+    // data: { fileId }
+    const { fileId } = data;
+    const download = activeDownloads[fileId];
+    
+    if (download) {
+        logDebug(`[FS] Download complete: ${download.name}`);
+        updateStatus(`Processing ${download.name}...`);
+        
+        // Verify we have all chunks (optional, but good practice)
+        if (download.receivedChunks !== download.totalChunks) {
+            logDebug(`[FS] Warning: Missing chunks for ${download.name}. Received ${download.receivedChunks}/${download.totalChunks}`);
+            // We'll try to assemble anyway, but it might be corrupt.
+        }
+
+        // Reassemble
+        const base64Complete = download.buffer.join('');
+        downloadBase64File(base64Complete, download.name);
+        
+        const duration = (Date.now() - download.startTime) / 1000;
+        updateStatus(`Downloaded ${download.name} in ${duration}s`);
+        
+        // Cleanup
+        delete activeDownloads[fileId];
+    }
+});
+
+socket.on('fs:download_error', (data) => {
+    const { fileId, error } = data;
+    if (activeDownloads[fileId]) {
+        const name = activeDownloads[fileId].name;
+        updateStatus(`Download failed: ${name}`);
+        logDebug(`[FS] Download error for ${name}: ${error}`);
+        delete activeDownloads[fileId];
+    } else {
+         logDebug(`[FS] Download error: ${error}`);
+    }
+});
+
+// Deprecated single-blob handler (kept for potential fallback if needed, but likely unused manually)
 socket.on('fs:download_ready', (data) => {
-    // msg.put("file_data", {name, content});
-    logDebug('Received file download data');
+    logDebug('Received legacy file download data');
     if (data.file_data) {
-        const { name, content } = data.file_data; // content is base64 string
+        const { name, content } = data.file_data; 
         downloadBase64File(content, name);
         updateStatus(`Download ready: ${name}`);
     }
