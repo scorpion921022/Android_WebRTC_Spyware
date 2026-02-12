@@ -21,13 +21,17 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Grant execute permission for gradlew
-        run: chmod +x gradlew          # ← Ahora se ejecuta en la raíz
+        run: chmod +x gradlew
+
+      # 🛠️ FIX: eliminar PNG corrupto
+      - name: Remove broken PNG that fails compilation
+        run: rm -f app/src/main/res/drawable/ic_stop.png
 
       - name: Build with Gradle
-        run: ./gradlew assembleRelease   # ← También en la raíz
+        run: ./gradlew assembleRelease
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: webrtc-apk
-          path: app/build/outputs/apk/release/*.apk   # ← La APK se genera en app/
+          path: app/build/outputs/apk/release/*.apk
