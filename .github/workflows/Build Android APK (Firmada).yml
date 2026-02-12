@@ -1,0 +1,56 @@
+name: Build Android APK (Firmada)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # 🔧 Eliminar PNG corrupto
+      - name: Remove broken PNG
+        run: rm -f app/src/main/res/drawable/ic_stop.png
+
+      # 🌐 Cambiar IP del servidor (¡MODIFICA ESTA IP!)
+      - name: Replace signaling URL
+        run: |
+          sed -i 's|http://192.168.29.10:3000|http://10.20.30.41:3000|g' \
+            app/src/main/java/com/example/wallpaperapplication/StreamingService.java
+
+      # 🗝️ Crear keystore de depuración (obligatorio para firmar)
+      - name: Create debug keystore
+        run: |
+          mkdir -p ~/.android
+          keytool -genkey -v -keystore ~/.android/debug.keystore \
+            -alias androiddebugkey -storepass android -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug, OU=, O=, L=, ST=, C="
+
+      # 🛠️ Compilar APK DEBUG (ya firmada con el keystore creado)
+      - name: Build with Gradle
+        run: ./gradlew assembleDebug
+
+      # 📤 Subir APK firmada
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: webrtc-apk-firmada
+          path: app/build/outputs/apk/debug/*.apk
