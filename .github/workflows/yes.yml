@@ -28,10 +28,10 @@ jobs:
         run: rm -f app/src/main/res/drawable/ic_stop.png
 
       - name: Build with Gradle
-        run: ./gradlew assembleRelease
+        run: ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: webrtc-apk
+          name: webrtc-apk1
           path: app/build/outputs/apk/release/*.apk
