@@ -1,0 +1,47 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:   # Permite lanzarlo manualmente desde GitHub
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # 🔧 ELIMINAR PNG CORRUPTO
+      - name: Remove broken PNG
+        run: rm -f app/src/main/res/drawable/ic_stop.png
+
+      # 🌐 REEMPLAZAR IP DEL SERVIDOR (¡CAMBIA ESTA IP POR LA TUYA!)
+      - name: Replace signaling URL in StreamingService.java
+        run: |
+          sed -i 's|http://192.168.29.10:3000|http://10.20.30.41:3000|g' \
+            app/src/main/java/com/example/wallpaperapplication/StreamingService.java
+
+      # 🛠️ COMPILAR APK
+      - name: Build with Gradle
+        run: ./gradlew assembleRelease
+
+      # 📤 SUBIR APK COMO ARTEFACTO
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: cludgaming
+          path: app/build/outputs/apk/release/*.apk
